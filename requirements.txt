@@ -1,8 +1,8 @@
 insightface
 gradio
 numpy
-onnx==1.16.0
-onnxruntime==1.17.3
-opencv-python==4.9.0.80
+onnx
+onnxruntime
+opencv-python
 torch
 torchvision
