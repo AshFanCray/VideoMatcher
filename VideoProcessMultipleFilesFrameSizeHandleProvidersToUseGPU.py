@@ -2,32 +2,31 @@ import os
 import cv2
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import gradio as gr
+import torch
 import onnxruntime as ort
 from insightface.app import FaceAnalysis
-import torch
+from insightface.utils import face_align
 
 class VideoMatcher:
     def __init__(self):
         if torch.cuda.is_available():
-            torch.cuda.set_device(0)
-            print(f"Using CUDA device: {torch.cuda.get_device_name(0)}")
             self.device = torch.device("cuda")
+            print(f"Using CUDA device: {torch.cuda.get_device_name(0)}")
+            providers = ['CUDAExecutionProvider']
         else:
-            print("CUDA is not available. Using CPU.")
             self.device = torch.device("cpu")
+            print("CUDA is not available. Using CPU.")
+            providers = ['CPUExecutionProvider']
         
-        providers = ort.get_available_providers()
-        print(f"Available ONNX Runtime providers: {providers}")
+        # Force onnxruntime to use CUDA
+        ort.set_default_logger_severity(3)
+        self.ort_session = ort.InferenceSession("path/to/your/insightface/model.onnx", 
+                                                providers=['CUDAExecutionProvider'])
         
-        if 'CUDAExecutionProvider' in providers:
-            print("Initializing FaceAnalysis with CUDA")
-            self.face_analyzer = FaceAnalysis(name='buffalo_l', providers=['CUDAExecutionProvider'])
-        else:
-            print("CUDA is not available for ONNX Runtime. Using CPU.")
-            self.face_analyzer = FaceAnalysis(name='buffalo_l', providers=['CPUExecutionProvider'])
-        
+        self.face_analyzer = FaceAnalysis(name='buffalo_l', providers=providers)
         self.face_analyzer.prepare(ctx_id=0, det_size=(640, 640))
+        
+        print(f"Providers used by onnxruntime: {self.ort_session.get_providers()}")
 
     def find_all_files(self, folder_path, extensions):
         return [os.path.join(root, file) 
@@ -43,13 +42,12 @@ class VideoMatcher:
         return None
 
     def process_frame(self, frame, reference_embedding):
-        frame_tensor = torch.from_numpy(frame).to(self.device)
-        faces = self.face_analyzer.get(frame_tensor.cpu().numpy())
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        faces = self.face_analyzer.get(frame_rgb)
+        
         for face in faces:
-            face_embedding = torch.from_numpy(face.embedding).to(self.device)
-            reference_embedding_tensor = torch.from_numpy(reference_embedding).to(self.device)
-            similarity = torch.dot(face_embedding, reference_embedding_tensor) / (torch.norm(face_embedding) * torch.norm(reference_embedding_tensor))
-            if similarity > 0.5:
+            similarity = np.dot(face.embedding, reference_embedding) / (np.linalg.norm(face.embedding) * np.linalg.norm(reference_embedding))
+            if similarity > 0.5:  # Adjust this threshold as needed
                 return True
         return False
 
@@ -76,13 +74,9 @@ class VideoMatcher:
             if not ret:
                 break
 
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            
-            # Save extracted frame
             cv2.imwrite(os.path.join(extracted_frames_folder, f"frame_{frame_count:06d}.jpg"), frame)
             
-            if self.process_frame(frame_rgb, reference_embedding):
-                # Save matched frame
+            if self.process_frame(frame, reference_embedding):
                 cv2.imwrite(os.path.join(matched_frames_folder, f"matched_frame_{matched_count:06d}.jpg"), frame)
                 matched_count += 1
 
@@ -90,7 +84,6 @@ class VideoMatcher:
 
         video.release()
 
-        # Create output video from matched frames
         output_video_path = os.path.join(output_folder, f"output_matched_{video_name}.mp4")
         self.create_video(matched_frames_folder, output_video_path, fps, (width, height))
 
@@ -152,23 +145,8 @@ class VideoMatcher:
 
         return "\n".join(results)
 
-def launch():
+def start_process():
+    video_folder = r"C:\Users\Amit_Local\Documents\Amit_Temp\ProcessVideo\VideoProcessor\VideoToProcess\Video"
+    reference_folder = r"C:\Users\Amit_Local\Documents\Amit_Temp\ProcessVideo\VideoProcessor\VideoToProcess\Reference"
     matcher = VideoMatcher()
-
-    def start_process(video_folder, reference_folder):
-        return matcher.process_videos(video_folder, reference_folder)
-
-    iface = gr.Interface(
-        fn=start_process,
-        inputs=[
-            gr.Textbox(label="Video Folder Path"),
-            gr.Textbox(label="Reference Image Folder Path")
-        ],
-        outputs=gr.Textbox(label="Result"),
-        title="Face Recognition in Multiple Videos",
-        description="Enter the paths to the folder containing videos and the folder with the reference image, then click 'Submit' to start the process."
-    )
-    iface.launch(server_name="127.0.0.1", server_port=3000)
-
-if __name__ == "__main__":
-    launch()
+    return matcher.process_videos(video_folder, reference_folder)
