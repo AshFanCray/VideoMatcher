@@ -1,12 +1,9 @@
 insightface
-filetype==1.2.0
 gradio==3.50.2
 numpy==1.26.4
 onnx==1.16.0
 onnxruntime==1.17.3
 opencv-python
-tqdm==4.66.4
-scipy==1.13.0
 torch==2.1.0
 torchvision==0.16.0
 Pillow==10.2.0
